@@ -1,17 +1,19 @@
 # logsentinel
 
-logsentinel scans web server access logs for suspicious clients. It parses Apache and nginx "combined" logs, builds a behaviour profile for each client IP, applies rules for brute force, scanning and data exfiltration, and uses an IsolationForest to flag clients that look unusual. It writes an alerts CSV and a self-contained HTML report.
+logsentinel looks through web server access logs for clients that behave suspiciously. It reads Apache and nginx logs in the combined format, builds a profile for each client IP, and checks for three things with simple rules: repeated failed logins, scanning for missing pages, and very large downloads. An IsolationForest also scores every client, so it can flag unusual behaviour the rules miss.
+
+The output is an alerts CSV and an HTML report you can open in a browser.
 
 ## How it works
 
-1. **Parse:** `logsentinel/parser.py` reads each line and counts lines it can't parse.
-2. **Profile:** `logsentinel/detect.py` aggregates events per client IP: request count, error rate, failed logins, 404s, distinct paths, response sizes, and whether the user agent looks like a scanner.
-3. **Rules:** transparent checks, with thresholds you can change in `RULE_THRESHOLDS`:
+1. **Parse:** `logsentinel/parser.py` reads each line and counts the ones it can't parse.
+2. **Profile:** `logsentinel/detect.py` summarises each IP: number of requests, error rate, failed logins, 404s, distinct paths, response sizes, and whether the user agent looks like a scanner.
+3. **Rules:** these are plain checks, and the thresholds are in `RULE_THRESHOLDS` so you can change them.
    - **brute_force:** 50 or more failed logins (401 on `POST /login`) from one IP
-   - **scanner:** 100 or more 404s, or a known scanner user agent such as sqlmap, nikto, nmap, masscan, or zgrab
+   - **scanner:** 100 or more 404s, or a user agent like sqlmap, nikto, nmap, masscan or zgrab
    - **exfiltration:** a single response of 50 MB or more
-4. **Anomaly score:** an IsolationForest over the same features. Clients in the top `contamination` fraction are flagged.
-5. **Output:** `alerts.csv` lists flagged clients and their evidence. `report.html` is a standalone page with a table of the same data.
+4. **Anomaly score:** an IsolationForest is fitted on the same features. The top `contamination` fraction of clients gets flagged.
+5. **Output:** `alerts.csv` lists the flagged clients with the evidence, and `report.html` shows the same data as a table.
 
 ## Install
 
@@ -22,33 +24,30 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-# Create a synthetic log with labelled attacks (for testing)
+# Make a test log with known attackers in it
 python -m logsentinel.cli generate --out access.log --labels labels.json
 
 # Analyse a log
 python -m logsentinel.cli analyze access.log --out-dir out
 
-# Score detections against labels
+# Compare detections with the known attackers
 python -m logsentinel.cli evaluate access.log --labels labels.json
 ```
 
-## Results on the synthetic test log
+## Results on the test log
 
-The synthetic log has 6,902 lines from 205 clients, including 5 injected attackers: 3 brute-force IPs, 1 scanner, and 1 exfiltration client.
+The test log has 6,902 lines from 205 clients, including 5 attackers I planted: 3 brute-force IPs, 1 scanner and 1 exfiltration client. All 5 were flagged, with no false positives.
 
-- All 5 attackers were flagged, with no false positives.
-- Precision 1.000, recall 1.000.
-
-Read these numbers with the limitations below. The injected attacks are extreme, so the rules catch them easily. The result shows the pipeline works end to end. It does not show how well it performs on real traffic.
+The attacks are very obvious, so the rules catch them easily. This shows the pipeline runs end to end. It doesn't show how well it works on real traffic.
 
 ## Limitations
 
-- **The test data is too easy.** The attacks are much more obvious than real attacks. Real evaluation needs real or realistic logs.
-- **The IsolationForest added nothing in the test run.** Every flagged client was already caught by a rule. Its value on subtler anomalies is untested.
-- **The thresholds are hand-picked** and haven't been tuned on real logs.
-- **Real traffic causes false positives.** Shared corporate IPs, NAT gateways, and legitimate crawlers can all trigger these rules.
+- **The test log is too easy.** Real attacks are much quieter, so I haven't tested it on realistic traffic yet.
+- **The IsolationForest added nothing in this test.** Every flagged client was already caught by a rule, so I can't yet say what it adds.
+- **The thresholds are guesses.** I haven't tuned them on real logs.
+- **Real traffic will cause false positives.** Shared corporate IPs, NAT gateways and legitimate crawlers can all trip these rules.
 - **Only the combined log format is supported.** Other formats need a different regex in `parser.py`.
-- **Single-file, batch analysis only.** There is no streaming mode, no IP allowlist, and no alert delivery.
+- **Batch only.** There's no live streaming, IP allowlist or alert delivery yet.
 
 ## Tests
 
@@ -56,18 +55,18 @@ Read these numbers with the limitations below. The injected attacks are extreme,
 pytest -q
 ```
 
-The 10 tests cover parsing, each rule, reproducible data generation, end-to-end detection on the synthetic log, and the CLI.
+There are 10 tests covering parsing, each rule, reproducible data generation, end-to-end detection on the test log, and the CLI.
 
-## Project layout
+## Layout
 
-| Path | Purpose |
+| Path | What it does |
 | --- | --- |
 | `logsentinel/parser.py` | Log line parsing |
-| `logsentinel/detect.py` | Client features, rules, and anomaly scoring |
-| `logsentinel/generate.py` | Synthetic log generator with labelled attacks |
+| `logsentinel/detect.py` | Client features, rules and anomaly scoring |
+| `logsentinel/generate.py` | Test log generator with planted attackers |
 | `logsentinel/report.py` | Alerts CSV and HTML report |
 | `logsentinel/cli.py` | Command-line interface |
-| `tests/test_logsentinel.py` | pytest suite |
+| `tests/test_logsentinel.py` | Tests |
 
 ## License
 
